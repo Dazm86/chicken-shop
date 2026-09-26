@@ -6,3 +6,4 @@ data/*.db
 _step4_extract/
 
 src/*.backup.js
+src/**/*.backup.js
