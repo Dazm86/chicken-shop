@@ -1,78 +1,49 @@
 require('dotenv').config();
-
-const express = require('express');
-const cors = require('cors');
-const path = require('path');
-const { getDb } = require('./db/database');
-
-const app = express();
-const PORT = Number(process.env.PORT || 3000);
-
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(process.cwd(), 'public')));
-
-app.get('/', (req, res) => {
-  res.sendFile(path.join(process.cwd(), 'public/customer/index.html'));
-});
-
-app.get('/api/health', async (req, res) => {
-  try {
-    await getDb();
-    res.json({
-      success: true,
-      message: 'Chicken Shop API is running',
-      database: 'connected'
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.get('/api/store', async (req, res) => {
-  try {
-    const db = await getDb();
-    const result = db.exec('SELECT * FROM store_settings WHERE id = 1');
-    const store = result.length ? result[0].values[0] : null;
-    const columns = result.length ? result[0].columns : [];
-    const data = store ? Object.fromEntries(columns.map((key, i) => [key, store[i]])) : null;
-    res.json({ success: true, store: data });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.get('/api/products', async (req, res) => {
-  try {
-    const db = await getDb();
-    const result = db.exec(`
-      SELECT p.*, c.name AS category_name
-      FROM products p
-      LEFT JOIN categories c ON c.id = p.category_id
-      WHERE p.active = 1
-      ORDER BY p.id DESC
-    `);
-    const products = result.length
-      ? result[0].values.map(row => Object.fromEntries(result[0].columns.map((key, i) => [key, row[i]])))
-      : [];
-    res.json({ success: true, products });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-async function start() {
-  try {
-    await getDb();
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Chicken Shop API running on port ${PORT}`);
-      console.log('Database: SQLite via sql.js (Android/Termux compatible)');
-    });
-  } catch (error) {
-    console.error('Failed to initialize database:', error);
-    process.exit(1);
-  }
-}
-
-start();
+const express=require('express'), cors=require('cors'), path=require('path'), crypto=require('crypto');
+const database=require('./db/database');
+const {getDb,run,all,one}=database;
+const app=express(); app.use(cors()); app.use(express.json()); app.use(express.static(path.join(process.cwd(),'public')));
+const token=()=>crypto.randomBytes(24).toString('hex'); const now=()=>new Date().toISOString();
+const asyncRoute=fn=>(req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next);
+function requireFields(body, fields){ const missing=fields.filter(k=>body[k]===undefined||body[k]===null||body[k]===''); if(missing.length) throw Object.assign(new Error(`فیلدهای الزامی: ${missing.join(', ')}`),{status:400}); }
+async function auth(req,res,next){ await getDb(); const t=(req.headers.authorization||'').replace('Bearer ',''); const s=one('SELECT * FROM sessions WHERE token=? AND expires_at>?',[t,now()]); if(!s||!s.user_id)return res.status(401).json({success:false,error:'ورود لازم است'}); req.user=one('SELECT * FROM users WHERE id=?',[s.user_id]); next(); }
+async function admin(req,res,next){ await getDb(); const t=(req.headers.authorization||'').replace('Bearer ',''); const s=one('SELECT * FROM sessions WHERE token=? AND expires_at>?',[t,now()]); if(!s||!s.admin_user_id)return res.status(401).json({success:false,error:'دسترسی مدیر لازم است'}); req.admin=one('SELECT * FROM admin_users WHERE id=? AND active=1',[s.admin_user_id]); if(!req.admin)return res.status(403).json({success:false,error:'مدیر غیرفعال است'}); next(); }
+const owner=(req,res,next)=>req.admin.role==='owner'?next():res.status(403).json({success:false,error:'فقط مالک'});
+function calculate(items, code){ const products=[]; let subtotal=0; for(const i of items||[]){const p=one('SELECT * FROM products WHERE id=?',[i.product_id]); if(!p||!p.active||p.stock<Number(i.quantity)||Number(i.quantity)<=0)throw Object.assign(new Error('محصول نامعتبر یا ناموجود است'),{status:400}); const total=Math.round(p.price*Number(i.quantity)); subtotal+=total;products.push({p,quantity:Number(i.quantity),total});} if(!products.length)throw Object.assign(new Error('سبد خرید خالی است'),{status:400}); const store=one('SELECT * FROM store_settings WHERE id=1'); if(!store.is_open)throw Object.assign(new Error('فروشگاه بسته است'),{status:400}); if(subtotal<store.min_order_amount)throw Object.assign(new Error('حداقل مبلغ سفارش رعایت نشده است'),{status:400}); let discount=0,discountRow=null; if(code){discountRow=one('SELECT * FROM discount_codes WHERE upper(code)=upper(?)',[code]); const active=discountRow&&discountRow.active&&(!discountRow.starts_at||discountRow.starts_at<=now())&&(!discountRow.ends_at||discountRow.ends_at>=now())&&(!discountRow.usage_limit||discountRow.usage_count<discountRow.usage_limit)&&subtotal>=discountRow.min_order_amount; if(!active)throw Object.assign(new Error('کد تخفیف معتبر نیست'),{status:400}); discount=discountRow.type==='percent'?Math.floor(subtotal*discountRow.value/100):discountRow.value; discount=Math.min(discount,subtotal); } const delivery=subtotal-discount>=store.free_delivery_min_amount?0:store.default_delivery_fee; return {products,subtotal,discount,delivery,total:subtotal-discount+delivery,discountRow}; }
+app.get('/',(q,r)=>r.sendFile(path.join(process.cwd(),'public/customer/index.html'))); app.get('/admin',(q,r)=>r.sendFile(path.join(process.cwd(),'public/admin/index.html')));
+app.get('/api/health',asyncRoute(async(q,r)=>{await getDb();r.json({success:true,message:'Chicken Shop API is running',database:'connected'});}));
+app.post('/api/auth/otp/request',asyncRoute(async(q,r)=>{requireFields(q.body,['phone']);if(!/^09\d{9}$/.test(q.body.phone))throw Object.assign(new Error('شماره موبایل نامعتبر است'),{status:400});const code='123456';run('INSERT INTO otp_codes(phone,code,expires_at) VALUES(?,?,?)',[q.body.phone,code,new Date(Date.now()+300000).toISOString()]);r.status(201).json({success:true,message:'OTP آزمایشی ثبت شد',otp:code});}));
+app.post('/api/auth/otp/verify',asyncRoute(async(q,r)=>{requireFields(q.body,['phone','code']);const otp=one('SELECT * FROM otp_codes WHERE phone=? AND code=? AND used=0 AND expires_at>? ORDER BY id DESC',[q.body.phone,q.body.code,now()]);if(!otp)return r.status(401).json({success:false,error:'OTP نامعتبر است'});run('UPDATE otp_codes SET used=1 WHERE id=?',[otp.id]);let u=one('SELECT * FROM users WHERE phone=?',[q.body.phone]);if(!u){run('INSERT INTO users(phone,name) VALUES(?,?)',[q.body.phone,q.body.name||null]);u=one('SELECT * FROM users WHERE phone=?',[q.body.phone]);}const t=token();run('INSERT INTO sessions(token,user_id,expires_at) VALUES(?,?,?)',[t,u.id,new Date(Date.now()+86400000*30).toISOString()]);r.json({success:true,token:t,user:u});}));
+app.post('/api/admin/login',asyncRoute(async(q,r)=>{requireFields(q.body,['phone']);const a=one('SELECT * FROM admin_users WHERE phone=? AND active=1',[q.body.phone]);if(!a)return r.status(403).json({success:false,error:'شماره مجاز نیست'});const t=token();run('INSERT INTO sessions(token,admin_user_id,expires_at) VALUES(?,?,?)',[t,a.id,new Date(Date.now()+86400000).toISOString()]);r.json({success:true,token:t,admin:a});}));
+app.post('/api/auth/logout',auth,asyncRoute(async(q,r)=>{run('DELETE FROM sessions WHERE token=?',[(q.headers.authorization||'').replace('Bearer ','')]);r.json({success:true});}));
+app.get('/api/store',asyncRoute(async(q,r)=>{await getDb();r.json({success:true,store:one('SELECT * FROM store_settings WHERE id=1'),delivery:one('SELECT * FROM delivery_settings WHERE id=1'),business_hours:all('SELECT * FROM business_hours ORDER BY day_of_week')});}));
+app.get('/api/categories',asyncRoute(async(q,r)=>{await getDb();r.json({success:true,categories:all('SELECT * FROM categories WHERE active=1 ORDER BY sort_order,id')});}));
+app.get('/api/products',asyncRoute(async(q,r)=>{await getDb();const where=q.query.category_id?'AND p.category_id=?':'';r.json({success:true,products:all(`SELECT p.*,c.name category_name FROM products p LEFT JOIN categories c ON c.id=p.category_id WHERE p.active=1 ${where} ORDER BY p.id DESC`,q.query.category_id?[q.query.category_id]:[])});}));
+app.get('/api/products/:id',asyncRoute(async(q,r)=>{await getDb();const p=one('SELECT * FROM products WHERE id=?',[q.params.id]);if(!p)return r.status(404).json({success:false,error:'یافت نشد'});r.json({success:true,product:p});}));
+app.post('/api/cart/quote',asyncRoute(async(q,r)=>{await getDb();r.json({success:true,...calculate(q.body.items,q.body.discount_code)});}));
+app.get('/api/addresses',auth,asyncRoute(async(q,r)=>r.json({success:true,addresses:all('SELECT * FROM addresses WHERE user_id=? ORDER BY id DESC',[q.user.id])})));
+app.post('/api/addresses',auth,asyncRoute(async(q,r)=>{requireFields(q.body,['province','city','address']);const id=run('INSERT INTO addresses(user_id,province,city,address,plaque,unit,description,latitude,longitude) VALUES(?,?,?,?,?,?,?,?,?)',[q.user.id,q.body.province,q.body.city,q.body.address,q.body.plaque||null,q.body.unit||null,q.body.description||null,q.body.latitude||null,q.body.longitude||null]);r.status(201).json({success:true,address:one('SELECT * FROM addresses WHERE id=?',[id])});}));
+app.post('/api/orders',auth,asyncRoute(async(q,r)=>{requireFields(q.body,['items','address_id','payment_method']);const ad=one('SELECT * FROM addresses WHERE id=? AND user_id=?',[q.body.address_id,q.user.id]);if(!ad)throw Object.assign(new Error('آدرس نامعتبر است'),{status:400});if(!['cod','mock_online'].includes(q.body.payment_method))throw Object.assign(new Error('روش پرداخت نامعتبر است'),{status:400});const c=calculate(q.body.items,q.body.discount_code);const n=`CS-${Date.now()}-${Math.floor(Math.random()*999)}`;const id=run('INSERT INTO orders(order_number,user_id,address_id,subtotal,discount_amount,delivery_fee,total_amount,payment_method,payment_status,delivery_time,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?)',[n,q.user.id,ad.id,c.subtotal,c.discount,c.delivery,c.total,q.body.payment_method,q.body.payment_method==='mock_online'?'paid':'pending',q.body.delivery_time||'اولین فرصت',q.body.notes||null]);for(const x of c.products){run('INSERT INTO order_items(order_id,product_id,product_name,unit,quantity,unit_price,total_price) VALUES(?,?,?,?,?,?,?)',[id,x.p.id,x.p.name,x.p.unit,x.quantity,x.p.price,x.total]);run('UPDATE products SET stock=stock-? WHERE id=?',[x.quantity,x.p.id]);}if(c.discountRow){run('UPDATE discount_codes SET usage_count=usage_count+1 WHERE id=?',[c.discountRow.id]);run('INSERT INTO discount_usages(discount_code_id,user_id,order_id) VALUES(?,?,?)',[c.discountRow.id,q.user.id,id]);}run('INSERT INTO payments(order_id,method,status,amount,reference) VALUES(?,?,?,?,?)',[id,q.body.payment_method,q.body.payment_method==='mock_online'?'paid':'pending',c.total,q.body.payment_method==='mock_online'?`MOCK-${id}`:null]);r.status(201).json({success:true,order:one('SELECT * FROM orders WHERE id=?',[id])});}));
+app.get('/api/orders',auth,asyncRoute(async(q,r)=>r.json({success:true,orders:all('SELECT * FROM orders WHERE user_id=? ORDER BY id DESC',[q.user.id])})));
+app.get('/api/orders/:id',auth,asyncRoute(async(q,r)=>{const o=one('SELECT * FROM orders WHERE id=? AND user_id=?',[q.params.id,q.user.id]);if(!o)return r.status(404).json({success:false,error:'یافت نشد'});o.items=all('SELECT * FROM order_items WHERE order_id=?',[o.id]);r.json({success:true,order:o});}));
+// Administration
+app.get('/api/admin/dashboard',admin,asyncRoute(async(q,r)=>{const today=now().slice(0,10);r.json({success:true,store:one('SELECT * FROM store_settings WHERE id=1'),new_orders:one("SELECT count(*) count FROM orders WHERE status='new'"),today_orders:one('SELECT count(*) count FROM orders WHERE substr(created_at,1,10)=?',[today]),today_sales:one("SELECT coalesce(sum(total_amount),0) total FROM orders WHERE substr(created_at,1,10)=? AND status!='cancelled'",[today]),shipping:one("SELECT count(*) count FROM orders WHERE status='shipped'"),recent:all('SELECT o.*,u.phone FROM orders o JOIN users u ON u.id=o.user_id ORDER BY o.id DESC LIMIT 10')});}));
+app.get('/api/admin/orders',admin,asyncRoute(async(q,r)=>r.json({success:true,orders:all('SELECT o.*,u.phone,u.name,a.address,a.latitude,a.longitude FROM orders o JOIN users u ON u.id=o.user_id LEFT JOIN addresses a ON a.id=o.address_id ORDER BY o.id DESC')})));
+app.patch('/api/admin/orders/:id/status',admin,asyncRoute(async(q,r)=>{requireFields(q.body,['status']);const o=one('SELECT * FROM orders WHERE id=?',[q.params.id]);const transitions={new:['confirmed','cancelled'],confirmed:['preparing','cancelled'],preparing:['shipped','cancelled'],shipped:['delivered'],delivered:[],cancelled:[]};if(!o||!transitions[o.status].includes(q.body.status))throw Object.assign(new Error('تغییر وضعیت نامعتبر است'),{status:400});run('UPDATE orders SET status=? WHERE id=?',[q.body.status,o.id]);run('INSERT INTO admin_logs(admin_user_id,action,details) VALUES(?,?,?)',[q.admin.id,'order_status',`${o.id}:${q.body.status}`]);r.json({success:true,order:one('SELECT * FROM orders WHERE id=?',[o.id])});}));
+app.get('/api/admin/products',admin,asyncRoute(async(q,r)=>r.json({success:true,products:all('SELECT * FROM products ORDER BY id DESC')})));
+app.post('/api/admin/products',admin,asyncRoute(async(q,r)=>{requireFields(q.body,['name','price','unit','stock']);const id=run('INSERT INTO products(category_id,name,description,price,unit,stock,image_url,active) VALUES(?,?,?,?,?,?,?,?)',[q.body.category_id||null,q.body.name,q.body.description||null,q.body.price,q.body.unit,q.body.stock,q.body.image_url||null,q.body.active===false?0:1]);r.status(201).json({success:true,product:one('SELECT * FROM products WHERE id=?',[id])});}));
+app.patch('/api/admin/products/:id',admin,asyncRoute(async(q,r)=>{const fields=['category_id','name','description','price','unit','stock','image_url','active'].filter(k=>q.body[k]!==undefined);if(!fields.length)throw Object.assign(new Error('تغییری ارسال نشده'),{status:400});run(`UPDATE products SET ${fields.map(k=>`${k}=?`).join(',')} WHERE id=?`,[...fields.map(k=>q.body[k]),q.params.id]);r.json({success:true,product:one('SELECT * FROM products WHERE id=?',[q.params.id])});}));
+app.delete('/api/admin/products/:id',admin,asyncRoute(async(q,r)=>{run('DELETE FROM products WHERE id=?',[q.params.id]);r.json({success:true});}));
+app.post('/api/admin/categories',admin,asyncRoute(async(q,r)=>{requireFields(q.body,['name']);const id=run('INSERT INTO categories(name,sort_order,active) VALUES(?,?,?)',[q.body.name,q.body.sort_order||0,q.body.active===false?0:1]);r.status(201).json({success:true,category:one('SELECT * FROM categories WHERE id=?',[id])});}));
+app.get('/api/admin/discounts',admin,asyncRoute(async(q,r)=>r.json({success:true,discounts:all('SELECT * FROM discount_codes ORDER BY id DESC')})));
+app.post('/api/admin/discounts',admin,asyncRoute(async(q,r)=>{requireFields(q.body,['code','type','value']);const id=run('INSERT INTO discount_codes(code,type,value,min_order_amount,starts_at,ends_at,usage_limit,active) VALUES(?,?,?,?,?,?,?,?)',[q.body.code,q.body.type,q.body.value,q.body.min_order_amount||0,q.body.starts_at||null,q.body.ends_at||null,q.body.usage_limit||null,q.body.active===false?0:1]);r.status(201).json({success:true,discount:one('SELECT * FROM discount_codes WHERE id=?',[id])});}));
+app.patch('/api/admin/store',admin,asyncRoute(async(q,r)=>{const f=['store_name','logo_url','is_open','min_order_amount','default_delivery_fee','free_delivery_min_amount','manual_status'].filter(k=>q.body[k]!==undefined);run(`UPDATE store_settings SET ${f.map(k=>`${k}=?`).join(',')} WHERE id=1`,f.map(k=>q.body[k]));r.json({success:true,store:one('SELECT * FROM store_settings WHERE id=1')});}));
+app.patch('/api/admin/delivery',admin,asyncRoute(async(q,r)=>{const f=['enabled','delivery_fee','free_delivery_min_amount','max_distance_km','test_latitude','test_longitude'].filter(k=>q.body[k]!==undefined);run(`UPDATE delivery_settings SET ${f.map(k=>`${k}=?`).join(',')} WHERE id=1`,f.map(k=>q.body[k]));r.json({success:true,delivery:one('SELECT * FROM delivery_settings WHERE id=1')});}));
+app.put('/api/admin/business-hours/:day',admin,asyncRoute(async(q,r)=>{run('UPDATE business_hours SET open_time=?,close_time=?,closed=? WHERE day_of_week=?',[q.body.open_time||null,q.body.close_time||null,q.body.closed?1:0,q.params.day]);r.json({success:true});}));
+app.get('/api/admin/admins',admin,asyncRoute(async(q,r)=>r.json({success:true,admins:all('SELECT * FROM admin_users')})));
+app.post('/api/admin/admins',admin,owner,asyncRoute(async(q,r)=>{requireFields(q.body,['phone','name']);const id=run("INSERT INTO admin_users(phone,name,role) VALUES(?,?,'admin')",[q.body.phone,q.body.name]);r.status(201).json({success:true,admin:one('SELECT * FROM admin_users WHERE id=?',[id])});}));
+app.delete('/api/admin/admins/:id',admin,owner,asyncRoute(async(q,r)=>{run("DELETE FROM admin_users WHERE id=? AND role='admin'",[q.params.id]);r.json({success:true});}));
+app.get('/api/admin/reports',admin,asyncRoute(async(q,r)=>{const p=[];let w="status!='cancelled'";if(q.query.from){w+=' AND substr(created_at,1,10)>=?';p.push(q.query.from)}if(q.query.to){w+=' AND substr(created_at,1,10)<=?';p.push(q.query.to)}r.json({success:true,report:one(`SELECT count(*) orders,coalesce(sum(total_amount),0) sales FROM orders WHERE ${w}`,p)});}));
+app.get('/api/admin/logs',admin,asyncRoute(async(q,r)=>r.json({success:true,logs:all('SELECT * FROM admin_logs ORDER BY id DESC')})));
+app.use((e,q,r,n)=>r.status(e.status||500).json({success:false,error:e.message||'خطای سرور'}));
+function start(port=Number(process.env.PORT||3000)){return getDb().then(()=>new Promise(resolve=>{const server=app.listen(port,'0.0.0.0',()=>{console.log(`Chicken Shop API running on port ${server.address().port}`);resolve(server);});}));} if(require.main===module)start(); module.exports={app,start,calculate};
