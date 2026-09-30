@@ -1,4 +1,109 @@
 <!doctype html>
-<html lang="fa" dir="rtl">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>مرغ فروشی</title><style>body{font-family:system-ui,sans-serif;margin:0;background:#f7f7f7;color:#222}.wrap{max-width:1000px;margin:auto;padding:24px}.hero{background:white;border-radius:18px;padding:28px;box-shadow:0 4px 18px #0001}.status{display:inline-block;padding:7px 12px;border-radius:20px;background:#e7f7ec;color:#16733a}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-top:20px}.card{background:white;border-radius:14px;padding:18px;border:1px solid #eee}.muted{color:#777}</style></head>
-<body><div class="wrap"><div class="hero"><h1 id="name">مرغ فروشی</h1><span class="status" id="status">در حال بررسی...</span><p class="muted">فروشگاه آنلاین مرغ و محصولات پروتئینی</p><div class="grid"><div class="card"><h3>محصولات</h3><p>به‌زودی محصولات فروشگاه اینجا نمایش داده می‌شوند.</p></div><div class="card"><h3>سبد خرید</h3><p>سبد خرید در مرحله بعد فعال می‌شود.</p></div><div class="card"><h3>حساب کاربری</h3><p>ورود با شماره موبایل در ادامه اضافه می‌شود.</p></div></div></div></div><script>fetch('/api/store').then(r=>r.json()).then(x=>{if(x.success){document.getElementById('name').textContent=x.store.store_name;document.getElementById('status').textContent=x.store.is_open?'فروشگاه باز است':'فروشگاه بسته است';document.getElementById('status').style.background=x.store.is_open?'#e7f7ec':'#fdeaea';document.getElementById('status').style.color=x.store.is_open?'#16733a':'#a22'}}).catch(()=>document.getElementById('status').textContent='اتصال به سرور برقرار نشد')</script></body></html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>مرغ فروشی</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Tahoma,Vazirmatn,sans-serif;background:#f6f6f4;color:#222;padding-bottom:70px;overflow-x:hidden}
+button,input,select,textarea{font:inherit}button{cursor:pointer}
+header{background:#fff;padding:12px 14px;box-shadow:0 1px 4px #0001;position:sticky;top:0;z-index:5}
+header h1{margin:0;font-size:18px}header small{color:#666;display:block;margin-top:4px}
+.badge{display:inline-block;padding:3px 10px;border-radius:99px;font-size:12px;margin-inline-start:8px}.open{background:#e3f6e8;color:#1b7a3a}.closed{background:#fde6e6;color:#b42323}
+main{padding:12px;max-width:760px;margin:auto}
+.chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px}.chip{flex:none;min-height:40px;padding:0 14px;border:1px solid #ddd;background:#fff;border-radius:99px}.chip.on{background:#c0392b;color:#fff;border-color:#c0392b}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.card{background:#fff;border-radius:12px;padding:12px;box-shadow:0 1px 3px #0001;min-width:0}.card h3{margin:0 0 4px;font-size:15px;overflow-wrap:anywhere}.muted{color:#777;font-size:12px}.price{font-weight:bold;margin:6px 0}
+.btn{min-height:44px;padding:0 16px;border:0;border-radius:10px;background:#c0392b;color:#fff;width:100%}.btn.alt{background:#eee;color:#222}.btn.sm{min-height:40px;width:auto}.btn:disabled{opacity:.5}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #eee}.row:last-child{border:0}
+.qty{display:flex;align-items:center;gap:6px}.qty button{width:40px;height:40px;border-radius:10px;border:1px solid #ddd;background:#fff;font-size:18px}
+nav{position:fixed;bottom:0;inset-inline:0;background:#fff;display:flex;border-top:1px solid #ddd;z-index:6}nav button{flex:1;min-height:56px;border:0;background:none;font-size:12px;color:#666}nav button.on{color:#c0392b;font-weight:bold}
+input,select,textarea{width:100%;min-height:44px;padding:8px 10px;border:1px solid #ccc;border-radius:10px;margin:4px 0 8px;background:#fff}
+#modal{position:fixed;inset:0;background:#0006;display:none;align-items:flex-end;justify-content:center;z-index:20}#modal.show{display:flex}
+.sheet{background:#fff;width:100%;max-width:560px;max-height:92vh;overflow:auto;border-radius:16px 16px 0 0;padding:16px}
+#toast{position:fixed;top:70px;inset-inline:12px;z-index:30;pointer-events:none}#toast div{background:#333;color:#fff;padding:10px 14px;border-radius:10px;margin-bottom:6px}#toast .err{background:#b42323}
+#map{height:220px;border-radius:10px;margin:6px 0;background:#eee}.tot{background:#fff;border-radius:12px;padding:12px;margin-top:10px}.empty{text-align:center;color:#777;padding:30px 10px}
+.st{font-size:12px;padding:2px 8px;border-radius:8px;background:#eef}
+</style></head><body>
+<header id="hd"></header><main id="app"></main><nav id="nav"></nav><div id="modal"></div><div id="toast"></div>
+<script>
+const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),fa=n=>Number(n).toLocaleString('fa-IR');
+let cart={};try{cart=JSON.parse(localStorage.getItem('cs_cart')||'{}')||{}}catch(e){}
+const S={token:localStorage.getItem('cs_token'),view:'home',cat:0,store:null,delivery:null,cats:[],prods:[],addrs:[],orders:[],addr:null,disc:null,pay:'online',busy:false};
+const ST={new:'ثبت شده',confirmed:'تأیید شده',preparing:'در حال آماده‌سازی',shipped:'ارسال شده',delivered:'تحویل داده شد',cancelled:'لغو شده'},PS={pending:'در انتظار پرداخت',paid:'پرداخت شده',failed:'ناموفق',refunded:'بازگشت وجه'};
+const unit=u=>u==='kg'?'کیلوگرم':u==='pcs'?'عدد':esc(u);
+function toast(m,e){const d=document.createElement('div');d.textContent=m;if(e)d.className='err';$('#toast').append(d);setTimeout(()=>d.remove(),3500)}
+async function api(m,u,b){const r=await fetch(u,{method:m,headers:{'Content-Type':'application/json',...(S.token?{Authorization:'Bearer '+S.token}:{})},body:b?JSON.stringify(b):undefined});let j={};try{j=await r.json()}catch(e){}
+ if(r.status===401&&S.token){S.token=null;localStorage.removeItem('cs_token');render()}if(!r.ok||j.success===false)throw new Error(j.error||'خطا در ارتباط با سرور');return j}
+const saveCart=()=>localStorage.setItem('cs_cart',JSON.stringify(cart));
+const step=p=>p.unit==='kg'?0.5:1;
+const P=id=>S.prods.find(p=>p.id==id);
+const lines=()=>Object.keys(cart).map(id=>({p:P(id),q:cart[id]})).filter(l=>l.p);
+const sub=()=>lines().reduce((a,l)=>a+Math.round(l.p.price*l.q),0);
+const fee=()=>{const d=S.delivery;return d&&d.enabled&&sub()<d.free_delivery_min_amount?d.delivery_fee:0};
+const tot=()=>sub()-(S.disc?S.disc.amount:0)+fee();
+const open=()=>S.store&&S.store.is_open;
+async function load(){try{const[s,c,p]=await Promise.all([api('GET','/api/store'),api('GET','/api/categories'),api('GET','/api/products')]);S.store=s.store;S.delivery=s.delivery;S.cats=c.categories;S.prods=p.products;
+ for(const id of Object.keys(cart))if(!P(id))delete cart[id];saveCart()}catch(e){toast(e.message,1);S.err=1}render()}
+function head(){const s=S.store;$('#hd').innerHTML=s?`<h1>${esc(s.store_name)}<span class="badge ${open()?'open':'closed'}">${open()?'فروشگاه باز است':'فروشگاه بسته است'}</span></h1>${s.phone?`<small>☎ ${esc(s.phone)}</small>`:''}${s.address?`<small>📍 ${esc(s.address)}</small>`:''}`:'<h1>مرغ فروشی</h1>'}
+function nav(){const n=Object.keys(cart).length;$('#nav').innerHTML=[['home','فروشگاه'],['cart','سبد'+(n?' ('+fa(n)+')':'')],['orders','سفارش‌ها'],['account','حساب من']].map(([v,t])=>`<button data-a="go" data-v="${v}" class="${S.view===v||(v==='cart'&&S.view==='checkout')?'on':''}">${t}</button>`).join('')}
+function vHome(){if(S.err&&!S.prods.length)return'<div class="empty">خطا در بارگذاری. <button class="btn sm" data-a="reload">تلاش دوباره</button></div>';
+ let h=`<div class="chips"><button class="chip ${!S.cat?'on':''}" data-a="cat" data-id="0">همه</button>${S.cats.map(c=>`<button class="chip ${S.cat==c.id?'on':''}" data-a="cat" data-id="${c.id}">${esc(c.name)}</button>`).join('')}</div>`;
+ const ps=S.prods.filter(p=>!S.cat||p.category_id==S.cat);if(!ps.length)return h+'<div class="empty">محصولی در این دسته موجود نیست.</div>';
+ return h+'<div class="grid">'+ps.map(p=>`<div class="card"><h3>${esc(p.name)}</h3><div class="muted">${esc(p.category_name||'')}</div><div class="muted">${esc(p.description||'')}</div><div class="price">${fa(p.price)} تومان / ${unit(p.unit)}</div><div class="muted">موجودی: ${fa(p.stock)} ${unit(p.unit)}</div>
+ ${cart[p.id]?`<div class="qty" style="margin-top:8px"><button data-a="inc" data-id="${p.id}">+</button><b>${fa(cart[p.id])}</b><button data-a="dec" data-id="${p.id}">−</button></div>`:`<button class="btn" style="margin-top:8px" data-a="add" data-id="${p.id}" ${p.stock<=0?'disabled':''}>${p.stock<=0?'ناموجود':'افزودن به سبد'}</button>`}</div>`).join('')+'</div>'}
+function vCart(){const L=lines();if(!L.length)return'<div class="empty">سبد خرید خالی است.<br><br><button class="btn sm" data-a="go" data-v="home">مشاهده محصولات</button></div>';
+ return'<div class="card">'+L.map(l=>`<div class="row"><div><b>${esc(l.p.name)}</b><div class="muted">${fa(l.p.price)} تومان / ${unit(l.p.unit)}</div></div><div class="qty"><button data-a="inc" data-id="${l.p.id}">+</button><b>${fa(l.q)}</b><button data-a="dec" data-id="${l.p.id}">−</button><button data-a="rm" data-id="${l.p.id}">🗑</button></div></div>`).join('')+'</div>'+totals()+'<button class="btn" style="margin-top:10px" data-a="go" data-v="checkout">ادامه و ثبت سفارش</button>'}
+function totals(){return`<div class="tot"><div class="row"><span>جمع اقلام</span><b>${fa(sub())} تومان</b></div>${S.disc?`<div class="row"><span>تخفیف</span><b>−${fa(S.disc.amount)} تومان</b></div>`:''}<div class="row"><span>هزینه ارسال</span><b>${fee()?fa(fee())+' تومان':'رایگان'}</b></div><div class="row"><span>مبلغ نهایی</span><b>${fa(tot())} تومان</b></div></div>`}
+function vCheckout(){if(!S.token)return'<div class="empty">برای ثبت سفارش وارد شوید.<br><br><button class="btn sm" data-a="login">ورود / ثبت‌نام</button></div>';if(!lines().length)return vCart();
+ return`<div class="card"><b>آدرس تحویل</b>${S.addrs.length?S.addrs.map(a=>`<label class="row"><span><input type="radio" name="ad" style="width:auto;min-height:0" data-a="pickaddr" data-id="${a.id}" ${S.addr==a.id?'checked':''}> ${esc(a.city||'')} ${esc(a.address)}</span></label>`).join(''):'<div class="muted">هنوز آدرسی ثبت نکرده‌اید.</div>'}<button class="btn alt sm" data-a="addrform">+ افزودن آدرس</button></div>
+ <div class="card" style="margin-top:10px"><b>کد تخفیف</b><div style="display:flex;gap:6px"><input id="dc" placeholder="کد تخفیف" value="${esc(S.disc?S.disc.code:'')}"><button class="btn sm" data-a="disc">اعمال</button></div>
+ <b>زمان ارسال</b><select id="dt"><option>در اسرع وقت</option><option>امروز ۱۲ تا ۱۵</option><option>امروز ۱۵ تا ۱۸</option><option>امروز ۱۸ تا ۲۱</option></select><b>توضیحات</b><textarea id="nt" rows="2" maxlength="300"></textarea>
+ <b>روش پرداخت</b><label class="row"><span><input type="radio" name="pm" style="width:auto;min-height:0" data-a="pay" data-v="online" ${S.pay==='online'?'checked':''}> پرداخت اینترنتی (آزمایشی)</span></label><label class="row"><span><input type="radio" name="pm" style="width:auto;min-height:0" data-a="pay" data-v="cod" ${S.pay==='cod'?'checked':''}> پرداخت درب منزل</span></label></div>${totals()}
+ ${open()?'':'<div class="empty" style="color:#b42323">فروشگاه فعلاً بسته است و سفارش ثبت نمی‌شود.</div>'}<button class="btn" style="margin-top:10px" data-a="order" ${S.busy||!open()?'disabled':''}>${S.busy?'در حال ثبت...':'ثبت سفارش'}</button>`}
+function vOrders(){if(!S.token)return'<div class="empty">برای دیدن سفارش‌ها وارد شوید.<br><br><button class="btn sm" data-a="login">ورود / ثبت‌نام</button></div>';if(!S.orders.length)return'<div class="empty">هنوز سفارشی ثبت نکرده‌اید.</div>';
+ return S.orders.map(o=>`<div class="card" style="margin-bottom:10px" data-a="odetail" data-id="${o.id}"><div class="row"><b>${esc(o.order_number)}</b><span class="st">${ST[o.status]}</span></div><div class="row"><span>${fa(o.total_amount)} تومان</span><span class="muted">${PS[o.payment_status]}</span></div><div class="muted">${esc(new Date(o.created_at.replace(' ','T')+'Z').toLocaleString('fa-IR'))}</div></div>`).join('')}
+function vAccount(){if(!S.token)return'<div class="empty"><button class="btn sm" data-a="login">ورود / ثبت‌نام</button></div>';
+ return`<div class="card"><b>شماره موبایل:</b> ${esc(S.me?S.me.phone:'')}</div><div class="card" style="margin-top:10px"><b>آدرس‌های من</b>${S.addrs.length?S.addrs.map(a=>`<div class="row"><span>${esc(a.city||'')} ${esc(a.address)}</span><button class="btn alt sm" data-a="deladdr" data-id="${a.id}">حذف</button></div>`).join(''):'<div class="muted">آدرسی ثبت نشده.</div>'}<button class="btn alt sm" data-a="addrform">+ افزودن آدرس</button></div><button class="btn alt" style="margin-top:10px" data-a="logout">خروج از حساب</button>`}
+function render(){head();nav();const v={home:vHome,cart:vCart,checkout:vCheckout,orders:vOrders,account:vAccount}[S.view];$('#app').innerHTML=v()}
+function modal(h){$('#modal').innerHTML='<div class="sheet">'+h+'</div>';$('#modal').classList.add('show')}
+function closeM(){$('#modal').classList.remove('show');$('#modal').innerHTML=''}
+$('#modal').addEventListener('click',e=>{if(e.target.id==='modal')closeM()});
+function loginForm(step,phone,hint){modal(`<h3>ورود / ثبت‌نام</h3>${step===1?`<label>شماره موبایل</label><input id="ph" type="tel" inputmode="numeric" placeholder="09123456789" value="${esc(phone||'')}"><button class="btn" data-a="otp">دریافت کد</button>`:`<div class="muted">کد آزمایشی (بدون پیامک واقعی): <b>${esc(hint)}</b></div><label>کد تأیید</label><input id="cd" inputmode="numeric" maxlength="6"><button class="btn" data-a="verify" data-p="${esc(phone)}">ورود</button>`}<button class="btn alt" style="margin-top:8px" data-a="close">بستن</button>`)}
+async function afterLogin(){const[m,a,o]=await Promise.all([api('GET','/api/auth/me'),api('GET','/api/addresses'),api('GET','/api/orders')]);S.me=m.user;S.addrs=a.addresses;S.orders=o.orders;if(!S.addr&&S.addrs[0])S.addr=S.addrs[0].id}
+let map,mk;
+function addrForm(){modal(`<h3>افزودن آدرس</h3><input id="a_pr" placeholder="استان"><input id="a_ci" placeholder="شهر"><textarea id="a_ad" rows="2" placeholder="آدرس کامل *" maxlength="300"></textarea><div style="display:flex;gap:6px"><input id="a_pl" placeholder="پلاک"><input id="a_un" placeholder="واحد"></div><input id="a_pc" placeholder="کد پستی" inputmode="numeric"><input id="a_ds" placeholder="توضیحات">
+ <div class="muted">موقعیت روی نقشه (روی نقشه بزنید)</div><div id="map"></div><button class="btn alt sm" data-a="geo">📍 موقعیت فعلی من</button><div style="display:flex;gap:6px"><input id="a_la" placeholder="عرض جغرافیایی" inputmode="decimal"><input id="a_lo" placeholder="طول جغرافیایی" inputmode="decimal"></div><button class="btn" data-a="saveaddr">ثبت آدرس</button><button class="btn alt" style="margin-top:8px" data-a="close">بستن</button>`);initMap()}
+function loadLeaflet(){return new Promise((ok,no)=>{if(window.L)return ok();const l=document.createElement('link');l.rel='stylesheet';l.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';document.head.append(l);const s=document.createElement('script');s.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';s.onload=ok;s.onerror=no;document.head.append(s)})}
+function setPt(la,lo){$('#a_la').value=la.toFixed(6);$('#a_lo').value=lo.toFixed(6);if(map){if(mk)mk.setLatLng([la,lo]);else mk=L.marker([la,lo]).addTo(map);map.setView([la,lo],Math.max(map.getZoom(),15))}}
+async function initMap(){map=mk=null;try{await loadLeaflet();if(!$('#map'))return;map=L.map('map').setView([35.6892,51.389],12);L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);map.on('click',e=>setPt(e.latlng.lat,e.latlng.lng))}catch(e){const m=$('#map');if(m){m.textContent='نقشه بارگذاری نشد (نیاز به اینترنت). می‌توانید مختصات را دستی وارد کنید یا آدرس را فقط بنویسید.';m.style.cssText+=';padding:10px;font-size:12px;height:auto'}}}
+const acts={
+ go(d){S.view=d.v;if(d.v==='orders'&&S.token)refresh();render()},reload(){load()},
+ cat(d){S.cat=+d.id;render()},
+ add(d){const p=P(d.id);if(!p)return;cart[d.id]=step(p);saveCart();S.disc=null;render()},
+ inc(d){const p=P(d.id),n=(cart[d.id]||0)+step(p);if(n>p.stock)return toast('موجودی کافی نیست',1);cart[d.id]=n;saveCart();S.disc=null;render()},
+ dec(d){const p=P(d.id),n=(cart[d.id]||0)-step(p);if(n<=0)delete cart[d.id];else cart[d.id]=n;saveCart();S.disc=null;render()},
+ rm(d){delete cart[d.id];saveCart();S.disc=null;render()},
+ login(){loginForm(1)},close:closeM,
+ async otp(){const phone=$('#ph').value;try{const r=await api('POST','/api/auth/request-otp',{phone});loginForm(2,phone,r.dev_code)}catch(e){toast(e.message,1)}},
+ async verify(d){try{const r=await api('POST','/api/auth/verify-otp',{phone:d.p,code:$('#cd').value});S.token=r.token;localStorage.setItem('cs_token',r.token);await afterLogin();closeM();toast('وارد شدید');render()}catch(e){toast(e.message,1)}},
+ async logout(){try{await api('POST','/api/auth/logout',{})}catch(e){}S.token=null;S.me=null;S.addrs=[];S.orders=[];localStorage.removeItem('cs_token');S.view='home';render()},
+ addrform(){if(!S.token)return acts.login();addrForm()},geo(){navigator.geolocation?navigator.geolocation.getCurrentPosition(p=>setPt(p.coords.latitude,p.coords.longitude),()=>toast('دسترسی به موقعیت ممکن نشد',1)):toast('مرورگر از موقعیت‌یابی پشتیبانی نمی‌کند',1)},
+ async saveaddr(){const v=i=>$('#'+i).value.trim(),b={province:v('a_pr'),city:v('a_ci'),address:v('a_ad'),postal_code:v('a_pc'),plaque:v('a_pl'),unit:v('a_un'),description:v('a_ds'),latitude:v('a_la'),longitude:v('a_lo')};
+  if(!b.address)return toast('آدرس را وارد کنید',1);try{const r=await api('POST','/api/addresses',b);S.addrs.unshift(r.address);S.addr=r.address.id;closeM();toast('آدرس ثبت شد');render()}catch(e){toast(e.message,1)}},
+ async deladdr(d){if(!confirm('آدرس حذف شود؟'))return;try{await api('DELETE','/api/addresses/'+d.id);S.addrs=S.addrs.filter(a=>a.id!=d.id);if(S.addr==d.id)S.addr=S.addrs[0]?S.addrs[0].id:null;render()}catch(e){toast(e.message,1)}},
+ pickaddr(d){S.addr=+d.id},pay(d){S.pay=d.v},
+ async disc(){const code=$('#dc').value.trim();if(!code){S.disc=null;return render()}try{const r=await api('POST','/api/discounts/validate',{code,subtotal:sub()});S.disc={code:code.toUpperCase(),amount:r.discount_amount};toast('کد تخفیف اعمال شد')}catch(e){S.disc=null;toast(e.message,1)}render()},
+ async order(){if(!S.addr)return toast('آدرس تحویل را انتخاب کنید',1);S.busy=true;const dt=$('#dt').value,nt=$('#nt').value;render();
+  try{const items=lines().map(l=>({product_id:l.p.id,quantity:l.q}));const r=await api('POST','/api/orders',{items,address_id:S.addr,payment_method:S.pay,discount_code:S.disc?S.disc.code:undefined,delivery_time:dt,notes:nt});
+   let msg='سفارش ثبت شد: '+r.order.order_number;if(S.pay==='online'){await api('POST','/api/payments/mock',{order_id:r.order.id});msg+=' (پرداخت آزمایشی انجام شد)'}
+   cart={};saveCart();S.disc=null;await load();await refresh();S.view='orders';toast(msg)}catch(e){toast(e.message,1)}S.busy=false;render()},
+ async odetail(d){try{const{order:o}=await api('GET','/api/orders/'+d.id);const canC=['new','confirmed','preparing'].includes(o.status);
+  modal(`<h3>${esc(o.order_number)}</h3><div class="row"><span>وضعیت</span><b>${ST[o.status]}</b></div><div class="row"><span>پرداخت</span><b>${PS[o.payment_status]} (${o.payment_method==='online'?'اینترنتی':'درب منزل'})</b></div>${o.items.map(i=>`<div class="row"><span>${esc(i.product_name)} × ${fa(i.quantity)}</span><b>${fa(i.total_price)}</b></div>`).join('')}<div class="row"><span>جمع اقلام</span><b>${fa(o.subtotal)}</b></div><div class="row"><span>تخفیف</span><b>${fa(o.discount_amount)}</b></div><div class="row"><span>ارسال</span><b>${fa(o.delivery_fee)}</b></div><div class="row"><span>مبلغ نهایی</span><b>${fa(o.total_amount)} تومان</b></div>${o.delivery_time?`<div class="muted">زمان ارسال: ${esc(o.delivery_time)}</div>`:''}${o.notes?`<div class="muted">توضیحات: ${esc(o.notes)}</div>`:''}
+  <button class="btn" style="margin-top:8px" data-a="reorder" data-id="${o.id}">خرید مجدد</button>${canC?`<button class="btn alt" style="margin-top:8px" data-a="cancel" data-id="${o.id}">لغو سفارش</button>`:''}<button class="btn alt" style="margin-top:8px" data-a="close">بستن</button>`)}catch(e){toast(e.message,1)}},
+ async cancel(d){if(!confirm('سفارش لغو شود؟'))return;try{await api('POST','/api/orders/'+d.id+'/cancel',{});closeM();await load();await refresh();toast('سفارش لغو شد');render()}catch(e){toast(e.message,1)}},
+ async reorder(d){try{const{order:o}=await api('GET','/api/orders/'+d.id);let n=0;for(const i of o.items){const p=P(i.product_id);if(p&&p.stock>0){cart[p.id]=Math.min(i.quantity,p.stock);n++}}saveCart();S.disc=null;closeM();S.view='cart';toast(n?'اقلام به سبد اضافه شد':'محصولات این سفارش موجود نیستند',!n);render()}catch(e){toast(e.message,1)}}
+};
+async function refresh(){if(!S.token)return;try{await afterLogin();if(S.view==='orders'&&!$('#modal').classList.contains('show'))render()}catch(e){}}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(b&&acts[b.dataset.a]&&!(b.tagName==='INPUT'&&e.type==='click'&&false)){acts[b.dataset.a](b.dataset)}});
+setInterval(()=>{if(S.view==='orders')refresh()},20000);
+(async()=>{await load();if(S.token){try{await afterLogin()}catch(e){}render()}})();
+</script></body></html>
